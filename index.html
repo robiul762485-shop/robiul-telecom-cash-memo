@@ -1,0 +1,310 @@
+
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>রবিউল টেলিকম - ক্যাশ মেমো</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f1f5f9;font-family:Arial,sans-serif;color:#172033}
+header{background:#123c68;color:white;padding:17px;text-align:center}
+header h2{margin:0 0 5px}
+main{max-width:850px;margin:18px auto;padding:12px}
+.card{background:white;padding:17px;border-radius:12px;margin-bottom:15px;box-shadow:0 2px 8px #0001}
+h3{margin-top:0;color:#123c68}
+input,select,textarea,button{width:100%;padding:11px;margin:6px 0;border:1px solid #ccd5df;border-radius:7px;font-size:15px}
+button{background:#1769aa;color:white;border:0;font-weight:bold;cursor:pointer}
+button.secondary{background:#64748b}
+button.danger{background:#b42318}
+.row{display:flex;gap:8px}
+.row>*{flex:1;min-width:0}
+.small{font-size:13px;color:#64748b}
+.hidden{display:none}
+table{width:100%;border-collapse:collapse;margin-top:10px}
+th,td{border:1px solid #ddd;padding:8px;text-align:left;font-size:14px}
+th{background:#eaf1f8}
+.actions{display:flex;gap:6px;flex-wrap:wrap}
+.actions button{width:auto;padding:8px 12px}
+#message{padding:10px;border-radius:7px;margin-bottom:10px}
+@media(max-width:520px){.row{flex-direction:column;gap:0}main{padding:8px}}
+@media print{
+ body{background:white}
+ header,.no-print,#app h3{display:none!important}
+ main{margin:0;padding:0}
+ .card{box-shadow:none;border:0}
+ #memoPrint{display:block!important}
+}
+</style>
+</head>
+<body>
+<header>
+<h2>রবিউল টেলিকম এন্ড ফটোকপি শপ</h2>
+<div>ক্যাশ মেমো ও হিসাব ব্যবস্থাপনা</div>
+</header>
+
+<main>
+<div id="message" class="hidden"></div>
+
+<section id="loginBox" class="card">
+<h3>মালিকের লগইন</h3>
+<input id="email" type="email" placeholder="আপনার Gmail">
+<input id="password" type="password" placeholder="পাসওয়ার্ড">
+<button onclick="login()">লগইন করুন</button>
+</section>
+
+<section id="app" class="hidden">
+<div class="card no-print">
+<div class="row">
+<div><b id="welcome">স্বাগতম</b></div>
+<div><button class="secondary" onclick="logout()">লগআউট</button></div>
+</div>
+</div>
+
+<div class="card no-print">
+<h3>নতুন কাস্টমার যোগ করুন</h3>
+<input id="cname" placeholder="কাস্টমারের নাম">
+<div class="row">
+<input id="cphone" placeholder="মোবাইল নম্বর">
+<input id="caddress" placeholder="ঠিকানা">
+</div>
+<button onclick="addCustomer()">কাস্টমার সংরক্ষণ</button>
+</div>
+
+<div class="card no-print">
+<h3>নতুন ক্যাশ মেমো</h3>
+<label>কাস্টমার নির্বাচন</label>
+<select id="customerSelect">
+<option value="">সাধারণ কাস্টমার</option>
+</select>
+<label>কাজ / পণ্যের বিবরণ</label>
+<input id="description" placeholder="যেমন: ফটোকপি, মোবাইল সার্ভিসিং">
+<div class="row">
+<div><label>পরিমাণ</label><input id="quantity" type="number" min="0.01" step="0.01" value="1"></div>
+<div><label>দর (টাকা)</label><input id="price" type="number" min="0" step="0.01" placeholder="0"></div>
+</div>
+<div class="row">
+<div><label>মোট টাকা</label><input id="total" readonly value="0"></div>
+<div><label>জমা টাকা</label><input id="paid" type="number" min="0" step="0.01" value="0"></div>
+</div>
+<textarea id="notes" placeholder="অতিরিক্ত মন্তব্য (ঐচ্ছিক)"></textarea>
+<button onclick="saveInvoice()">মেমো তৈরি ও সংরক্ষণ</button>
+</div>
+
+<div class="card no-print">
+<h3>কাস্টমার তালিকা</h3>
+<div id="customerList" class="small">লোড হচ্ছে...</div>
+</div>
+
+<div class="card no-print">
+<h3>সাম্প্রতিক ক্যাশ মেমো</h3>
+<div class="row">
+<input id="search" placeholder="মেমো নম্বর দিয়ে খুঁজুন" oninput="showInvoices()">
+<button onclick="loadData()">রিফ্রেশ</button>
+</div>
+<div id="invoiceList">লোড হচ্ছে...</div>
+</div>
+</section>
+
+<section id="memoPrint" class="card hidden"></section>
+</main>
+
+<script>
+const SUPABASE_URL = "https://nhksmqayzzfwyvzbtvut.supabase.co";
+const SUPABASE_KEY = "sb_publishable_My4F3JK2_d9eTvXH3uR5yg_MBvD0JDf";
+const db = window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+let currentUser = null;
+let customers = [];
+let invoices = [];
+
+function msg(text,error=false){
+ const el=document.getElementById("message");
+ el.textContent=text;
+ el.className="";
+ el.style.background=error?"#fee2e2":"#dcfce7";
+ el.style.color=error?"#991b1b":"#166534";
+}
+function hideMsg(){document.getElementById("message").className="hidden"}
+function esc(s){
+ return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function money(n){return Number(n||0).toFixed(2)}
+
+async function login(){
+ hideMsg();
+ const email=document.getElementById("email").value.trim();
+ const password=document.getElementById("password").value;
+ if(!email||!password)return msg("Gmail ও পাসওয়ার্ড লিখুন।",true);
+ const {data,error}=await db.auth.signInWithPassword({email,password});
+ if(error)return msg(error.message,true);
+ currentUser=data.user;
+ await startApp();
+}
+async function logout(){
+ await db.auth.signOut();
+ currentUser=null;
+ document.getElementById("app").classList.add("hidden");
+ document.getElementById("loginBox").classList.remove("hidden");
+ document.getElementById("memoPrint").classList.add("hidden");
+}
+async function startApp(){
+ document.getElementById("loginBox").classList.add("hidden");
+ document.getElementById("app").classList.remove("hidden");
+ document.getElementById("welcome").textContent="স্বাগতম: "+(currentUser.email||"মালিক");
+ await loadData();
+}
+
+async function loadData(){
+ hideMsg();
+ const [c,i]=await Promise.all([
+  db.from("customers").select("*").order("created_at",{ascending:false}),
+  db.from("invoices").select("*").order("created_at",{ascending:false}).limit(100)
+ ]);
+ if(c.error)return msg("কাস্টমার লোড হয়নি: "+c.error.message,true);
+ if(i.error)return msg("মেমো লোড হয়নি: "+i.error.message,true);
+ customers=c.data||[];
+ invoices=i.data||[];
+ showCustomers();
+ showCustomerOptions();
+ showInvoices();
+}
+
+function showCustomers(){
+ const el=document.getElementById("customerList");
+ if(!customers.length){el.textContent="এখনো কোনো কাস্টমার নেই।";return}
+ el.innerHTML="<table><tr><th>নাম</th><th>মোবাইল</th><th>ঠিকানা</th></tr>"+
+ customers.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.phone)}</td><td>${esc(c.address)}</td></tr>`).join("")+"</table>";
+}
+function showCustomerOptions(){
+ const s=document.getElementById("customerSelect");
+ s.innerHTML='<option value="">সাধারণ কাস্টমার</option>'+
+ customers.map(c=>`<option value="${c.id}">${esc(c.name)}${c.phone?" - "+esc(c.phone):""}</option>`).join("");
+}
+async function addCustomer(){
+ const name=document.getElementById("cname").value.trim();
+ if(!name)return msg("কাস্টমারের নাম লিখুন।",true);
+ const {error}=await db.from("customers").insert({
+  user_id:currentUser.id,
+  name,
+  phone:document.getElementById("cphone").value.trim(),
+  address:document.getElementById("caddress").value.trim()
+ });
+ if(error)return msg("সংরক্ষণ হয়নি: "+error.message,true);
+ ["cname","cphone","caddress"].forEach(id=>document.getElementById(id).value="");
+ msg("কাস্টমার সংরক্ষণ হয়েছে।");
+ await loadData();
+}
+
+function calculate(){
+ const q=Number(document.getElementById("quantity").value||0);
+ const p=Number(document.getElementById("price").value||0);
+ document.getElementById("total").value=money(q*p);
+}
+document.getElementById("quantity").addEventListener("input",calculate);
+document.getElementById("price").addEventListener("input",calculate);
+
+async function saveInvoice(){
+ hideMsg();
+ const description=document.getElementById("description").value.trim();
+ const quantity=Number(document.getElementById("quantity").value);
+ const price=Number(document.getElementById("price").value);
+ const total=quantity*price;
+ const paid=Number(document.getElementById("paid").value||0);
+ if(!description)return msg("কাজ বা পণ্যের বিবরণ লিখুন।",true);
+ if(quantity<=0||price<0||!Number.isFinite(total))return msg("পরিমাণ ও দর সঠিকভাবে লিখুন।",true);
+ if(paid<0||paid>total)return msg("জমা টাকা মোট টাকার বেশি হতে পারবে না।",true);
+
+ const invoiceNo="RT-"+Date.now();
+ const {data:inv,error}=await db.from("invoices").insert({
+  user_id:currentUser.id,
+  customer_id:document.getElementById("customerSelect").value||null,
+  invoice_no:invoiceNo,
+  invoice_date:new Date().toISOString().slice(0,10),
+  total_amount:total,
+  paid_amount:paid,
+  notes:document.getElementById("notes").value.trim()
+ }).select().single();
+
+ if(error)return msg("মেমো তৈরি হয়নি: "+error.message,true);
+
+ const {error:itemError}=await db.from("invoice_items").insert({
+  user_id:currentUser.id,
+  invoice_id:inv.id,
+  description,
+  quantity,
+  unit_price:price
+ });
+ if(itemError){
+  await db.from("invoices").delete().eq("id",inv.id);
+  return msg("মেমোর পণ্য সংরক্ষণ হয়নি: "+itemError.message,true);
+ }
+
+ document.getElementById("description").value="";
+ document.getElementById("quantity").value=1;
+ document.getElementById("price").value="";
+ document.getElementById("paid").value=0;
+ document.getElementById("notes").value="";
+ calculate();
+ msg("ক্যাশ মেমো সফলভাবে সংরক্ষণ হয়েছে।");
+ await loadData();
+ await printInvoice(inv.id);
+}
+
+function showInvoices(){
+ const q=document.getElementById("search").value.trim().toLowerCase();
+ const filtered=invoices.filter(i=>(i.invoice_no||"").toLowerCase().includes(q));
+ const el=document.getElementById("invoiceList");
+ if(!filtered.length){el.textContent="কোনো মেমো পাওয়া যায়নি।";return}
+ el.innerHTML="<table><tr><th>মেমো</th><th>তারিখ</th><th>মোট</th><th>বাকি</th><th>কাজ</th></tr>"+
+ filtered.map(i=>`<tr>
+ <td>${esc(i.invoice_no)}</td>
+ <td>${esc(i.invoice_date)}</td>
+ <td>${money(i.total_amount)}</td>
+ <td>${money(i.due_amount)}</td>
+ <td><button onclick="printInvoice('${i.id}')">দেখুন / প্রিন্ট</button></td>
+ </tr>`).join("")+"</table>";
+}
+
+async function printInvoice(id){
+ const inv=invoices.find(x=>x.id===id);
+ if(!inv)return msg("মেমো পাওয়া যায়নি।",true);
+ const [itemResult,customerResult]=await Promise.all([
+  db.from("invoice_items").select("*").eq("invoice_id",id),
+  inv.customer_id?db.from("customers").select("*").eq("id",inv.customer_id).maybeSingle():Promise.resolve({data:null,error:null})
+ ]);
+ if(itemResult.error)return msg("মেমোর বিবরণ পাওয়া যায়নি।",true);
+ const c=customerResult.data;
+ const items=itemResult.data||[];
+ const due=Number(inv.total_amount)-Number(inv.paid_amount);
+ const box=document.getElementById("memoPrint");
+ box.classList.remove("hidden");
+ box.innerHTML=`
+ <div style="text-align:center">
+ <h2>রবিউল টেলিকম এন্ড ফটোকপি শপ</h2>
+ <p>ক্যাশ মেমো</p>
+ </div>
+ <hr>
+ <p>মেমো নং: ${esc(inv.invoice_no)}</p>
+ <p>তারিখ: ${esc(inv.invoice_date)}</p>
+ <p>কাস্টমার: ${esc(c?.name||"সাধারণ কাস্টমার")}</p>
+ <p>মোবাইল: ${esc(c?.phone||"-")}</p>
+ <table><tr><th>বিবরণ</th><th>পরিমাণ</th><th>দর</th><th>মোট</th></tr>
+ ${items.map(x=>`<tr><td>${esc(x.description)}</td><td>${money(x.quantity)}</td><td>${money(x.unit_price)}</td><td>${money(x.line_total)}</td></tr>`).join("")}
+ </table>
+ <h3 style="text-align:right">সর্বমোট: ${money(inv.total_amount)} টাকা</h3>
+ <p style="text-align:right">জমা: ${money(inv.paid_amount)} টাকা</p>
+ <h3 style="text-align:right">বাকি: ${money(due)} টাকা</h3>
+ <p>মন্তব্য: ${esc(inv.notes||"-")}</p>
+ <hr><p style="text-align:center">ধন্যবাদ, আবার আসবেন।</p>
+ <div class="no-print"><button onclick="window.print()">প্রিন্ট করুন</button><button class="secondary" onclick="document.getElementById('memoPrint').classList.add('hidden')">বন্ধ করুন</button></div>`;
+ box.scrollIntoView({behavior:"smooth"});
+}
+
+db.auth.getSession().then(({data})=>{
+ if(data.session){currentUser=data.session.user;startApp();}
+});
+</script>
+</body>
+</html>
